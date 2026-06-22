@@ -1,0 +1,125 @@
+default:
+  image: docker:25.0.3-dind
+  tags:
+    - arm64-runner
+  before_script:
+    # Install git + certs (docker:dind is minimal)
+    - apk add --no-cache git openssh-client ca-certificates
+    # Start Docker daemon inside the job container
+    - dockerd -l fatal &
+    - sleep 5
+
+variables:
+  # Kubernetes resources
+  KUBERNETES_CPU_REQUEST: "16"
+  KUBERNETES_MEMORY_REQUEST: "128G"
+  KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "256G"
+  KUBERNETES_POD_ANNOTATIONS_1: "MOUNT_EFS=/data"
+
+  # Docker image details
+  IMAGE_REGISTRY: artifacts.codelinaro.org
+  IMAGE_PATH: iot-solutions-microservices
+  IMAGE_NAME: qimsdk
+  IMAGE_TAG: 2.0.0
+
+  FULL_IMAGE_NAME: "${IMAGE_REGISTRY}/${IMAGE_PATH}/${IMAGE_NAME}:${IMAGE_TAG}"
+  FULL_IMAGE_LATEST: "${IMAGE_REGISTRY}/${IMAGE_PATH}/${IMAGE_NAME}:latest"
+
+  DOCKER_BUILDKIT: "1"
+
+  # ---------------------------------------------------------
+  # Source fetch details (CodeLinaro GitLab)
+  # ---------------------------------------------------------
+  QIMSDK_TOOLS_REPO_URL: "https://git.codelinaro.org/clo/le/sdk-tools.git"
+  QIMSDK_TOOLS_BRANCH: "imsdk-tools.lnx.1.0"
+  QIMSDK_TOOLS_COMMIT: "1e0066138ec34679dcd69995447d9a94b9ad4ef8"
+
+  QIMSDK_DEBIAN_DIR: "qimsdk-debian"
+  QIMSDK_DOCKERFILE: "Dockerfile"
+  QIMSDK_ARG_QNP_VERSION: "2.47.0.260601"
+  QIMSDK_ARG_CAMERA_SERVICE_TAG: "1.0.0"
+  QIMSDK_ARG_GST_PLUGINS_TAG: "1.0.0"
+
+stages:
+  - build
+  - test
+
+# ---------------------------------------------------------
+# Build & push the final runtime image (version + latest)
+# ---------------------------------------------------------
+build-image:
+  stage: build
+  script:
+    - echo "Checking Docker daemon"
+    - docker version
+    - docker info
+
+    - echo "Logging into JFrog Docker registry"
+    - echo "$JFROG_PASSWORD" | docker login -u "$JFROG_USERNAME" --password-stdin "$IMAGE_REGISTRY"
+
+    - echo "Cloning sdk-tools from CodeLinaro"
+    - rm -rf sdk-tools
+    - git clone --no-tags --single-branch --branch "${QIMSDK_TOOLS_BRANCH}" "${QIMSDK_TOOLS_REPO_URL}" sdk-tools
+    - cd sdk-tools
+    - git fetch --depth 1 origin "${QIMSDK_TOOLS_COMMIT}"
+    - git checkout "${QIMSDK_TOOLS_COMMIT}"
+    - git rev-parse HEAD
+
+    - echo "Building QIMSDK deploy image (ARM64) from checked-out sources"
+    - cd "${QIMSDK_DEBIAN_DIR}"
+    - |
+      docker build \
+        --build-arg QIMSDK_ARG_QNP_VERSION="${QIMSDK_ARG_QNP_VERSION}" \
+        --build-arg QIMSDK_ARG_CAMERA_SERVICE_TAG="${QIMSDK_ARG_CAMERA_SERVICE_TAG}" \
+        --build-arg QIMSDK_ARG_GST_PLUGINS_TAG="${QIMSDK_ARG_GST_PLUGINS_TAG}" \
+        --target qimsdk_deploy_arm64 \
+        -t "${FULL_IMAGE_NAME}" \
+        -f "${QIMSDK_DOCKERFILE}" \
+        .
+
+    # Ensure local 'latest' tag doesn't point to an older image before re-tagging
+    - echo "Clearing any existing local :latest tag (safe if missing)"
+    - docker rmi "${FULL_IMAGE_LATEST}" 2>/dev/null || true
+
+    - echo "Tagging the just-built image as :latest"
+    - docker tag "${FULL_IMAGE_NAME}" "${FULL_IMAGE_LATEST}"
+
+    - echo "Pushing versioned image to Artifactory"
+    - docker push "${FULL_IMAGE_NAME}"
+
+    - echo "Pushing :latest tag to Artifactory"
+    - docker push "${FULL_IMAGE_LATEST}"
+
+# ---------------------------------------------------------
+# Smoke test: run container from the built image
+# ---------------------------------------------------------
+test-with-image:
+  stage: test
+  needs: ["build-image"]
+  script:
+    - echo "Logging into JFrog"
+    - echo "$JFROG_PASSWORD" | docker login -u "$JFROG_USERNAME" --password-stdin "$IMAGE_REGISTRY"
+
+    - echo "Running QIMSDK runtime smoke test on :latest"
+    - |
+      docker run --rm \
+        --entrypoint /bin/bash \
+        "${FULL_IMAGE_LATEST}" \
+        -c "
+          echo '== OS ==' &&
+          cat /etc/os-release &&
+          echo '== Image ==' &&
+          echo 'qimsdk_deploy_arm64 smoke test PASSED'
+        "
+
+    - echo "Running QIMSDK runtime smoke test on versioned tag"
+    - |
+      docker run --rm \
+        --entrypoint /bin/bash \
+        "${FULL_IMAGE_NAME}" \
+        -c "
+          echo '== OS ==' &&
+          cat /etc/os-release &&
+          echo '== Image ==' &&
+          echo 'qimsdk_deploy_arm64 smoke test PASSED'
+        "
