@@ -20,7 +20,7 @@ variables:
   IMAGE_REGISTRY: artifacts.codelinaro.org
   IMAGE_PATH: iot-solutions-microservices
   IMAGE_NAME: qimsdk
-  IMAGE_TAG: 2.0.0
+  IMAGE_TAG: 2.0.1
 
   FULL_IMAGE_NAME: "${IMAGE_REGISTRY}/${IMAGE_PATH}/${IMAGE_NAME}:${IMAGE_TAG}"
   FULL_IMAGE_LATEST: "${IMAGE_REGISTRY}/${IMAGE_PATH}/${IMAGE_NAME}:latest"
@@ -32,13 +32,13 @@ variables:
   # ---------------------------------------------------------
   QIMSDK_TOOLS_REPO_URL: "https://git.codelinaro.org/clo/le/sdk-tools.git"
   QIMSDK_TOOLS_BRANCH: "imsdk-tools.lnx.1.0"
-  QIMSDK_TOOLS_COMMIT: "1e0066138ec34679dcd69995447d9a94b9ad4ef8"
+  QIMSDK_TOOLS_COMMIT: "c445cbbf6c78d6cc1bf6b0008392ec3cf32ed4d0"
 
   QIMSDK_DEBIAN_DIR: "qimsdk-debian"
   QIMSDK_DOCKERFILE: "Dockerfile"
   QIMSDK_ARG_QNP_VERSION: "2.47.0.260601"
-  QIMSDK_ARG_CAMERA_SERVICE_TAG: "1.0.0"
-  QIMSDK_ARG_GST_PLUGINS_TAG: "1.0.0"
+  QIMSDK_ARG_CAMERA_SERVICE_TAG: "1.0.2"
+  QIMSDK_ARG_GST_PLUGINS_TAG: "1.0.2"
 
 stages:
   - build

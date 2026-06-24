@@ -9,7 +9,7 @@ Its `.gitlab-ci.yml` builds and validates an ARM64 Docker image for the QIMSDK d
 - Starts Docker-in-Docker in `before_script`
 - Defines image coordinates for:
   - `artifacts.codelinaro.org/iot-solutions-microservices/qimsdk`
-  - versioned tag: `2.0.0`
+  - versioned tag: `2.0.1`
   - `latest` tag
 - Clones `sdk-tools` from CodeLinaro
 - Checks out a pinned commit
@@ -41,10 +41,10 @@ The pipeline uses the following key settings:
 - **Registry:** `artifacts.codelinaro.org`
 - **Image path:** `iot-solutions-microservices`
 - **Image name:** `qimsdk`
-- **Image tag:** `2.0.0`
+- **Image tag:** `2.0.1`
 - **Source repo:** `https://git.codelinaro.org/clo/le/sdk-tools.git`
 - **Source branch:** `imsdk-tools.lnx.1.0`
-- **Pinned commit:** `1e0066138ec34679dcd69995447d9a94b9ad4ef8`
+- **Pinned commit:** `c445cbbf6c78d6cc1bf6b0008392ec3cf32ed4d0`
 - **Build target:** `qimsdk_deploy_arm64`
 
 ## Kubernetes resource requirements
