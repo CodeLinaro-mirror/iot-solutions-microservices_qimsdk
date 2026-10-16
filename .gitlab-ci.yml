@@ -4,7 +4,7 @@ default:
     - arm64-runner
   before_script:
     # Install git + certs (docker:dind is minimal)
-    - apk add --no-cache git openssh-client ca-certificates
+    - apk add --no-cache git openssh-client ca-certificates jq bash rsync
     # Start Docker daemon inside the job container
     - dockerd -l fatal &
     - sleep 5
@@ -20,25 +20,39 @@ variables:
   IMAGE_REGISTRY: artifacts.codelinaro.org
   IMAGE_PATH: iot-solutions-microservices
   IMAGE_NAME: qimsdk
-  IMAGE_TAG: 2.0.1
+  IMAGE_TAG: 2.1.0
 
   FULL_IMAGE_NAME: "${IMAGE_REGISTRY}/${IMAGE_PATH}/${IMAGE_NAME}:${IMAGE_TAG}"
   FULL_IMAGE_LATEST: "${IMAGE_REGISTRY}/${IMAGE_PATH}/${IMAGE_NAME}:latest"
 
+  FULL_IMAGE_PYTHON_NAME: "${IMAGE_REGISTRY}/${IMAGE_PATH}/${IMAGE_NAME}-python:${IMAGE_TAG}"
+  FULL_IMAGE_PYTHON_LATEST: "${IMAGE_REGISTRY}/${IMAGE_PATH}/${IMAGE_NAME}-python:latest"
+
   DOCKER_BUILDKIT: "1"
+
+  # ---------------------------------------------------------
+  # Used tags, branches or commits
+  # ---------------------------------------------------------
+
+  QIMSDK_QAIRT_VERSION: "2.50.0.260828"
+
+  QIMSDK_GST_QTI_PATCHES_COMMIT: "a4db6968a1f467875407a2008d7c13974a826fe4"
+  
+  QIMSDK_CAMERA_SERVICE_COMMIT: "1.0.6"
+
+  QIMSDK_GST_PLUGINS_COMMIT: "2.0.2"
+
+  QIMSDK_SOLUTIONS_MICROSERVICES_COMMIT: "805fd443c8ffe75eed16ca54a68602535c80e232"
 
   # ---------------------------------------------------------
   # Source fetch details (CodeLinaro GitLab)
   # ---------------------------------------------------------
+
   QIMSDK_TOOLS_REPO_URL: "https://git.codelinaro.org/clo/le/sdk-tools.git"
   QIMSDK_TOOLS_BRANCH: "imsdk-tools.lnx.1.0"
-  QIMSDK_TOOLS_COMMIT: "c445cbbf6c78d6cc1bf6b0008392ec3cf32ed4d0"
+  QIMSDK_TOOLS_COMMIT: "fcc71f5f12791f77d8174cb5772eab6c785578d7"
 
-  QIMSDK_DEBIAN_DIR: "qimsdk-debian"
-  QIMSDK_DOCKERFILE: "Dockerfile"
-  QIMSDK_ARG_QNP_VERSION: "2.47.0.260601"
-  QIMSDK_ARG_CAMERA_SERVICE_TAG: "1.0.2"
-  QIMSDK_ARG_GST_PLUGINS_TAG: "1.0.2"
+  QIMSDK_DEBIAN_DIR: "sdk_tools/qimsdk-debian"
 
 stages:
   - build
@@ -57,38 +71,42 @@ build-image:
     - echo "Logging into JFrog Docker registry"
     - echo "$JFROG_PASSWORD" | docker login -u "$JFROG_USERNAME" --password-stdin "$IMAGE_REGISTRY"
 
-    - echo "Cloning sdk-tools from CodeLinaro"
-    - rm -rf sdk-tools
-    - git clone --no-tags --single-branch --branch "${QIMSDK_TOOLS_BRANCH}" "${QIMSDK_TOOLS_REPO_URL}" sdk-tools
-    - cd sdk-tools
-    - git fetch --depth 1 origin "${QIMSDK_TOOLS_COMMIT}"
-    - git checkout "${QIMSDK_TOOLS_COMMIT}"
+    - echo "Cloning sdk tools from CodeLinaro"
+    - rm -rf sdk_tools
+    - git clone --no-tags --single-branch --branch "${QIMSDK_TOOLS_BRANCH}" "${QIMSDK_TOOLS_REPO_URL}" sdk_tools
+    - |
+      if [ -n "${QIMSDK_TOOLS_COMMIT}" ]; then
+        echo "Checking out commit: ${QIMSDK_TOOLS_COMMIT}"
+        git -C sdk_tools fetch --depth 1 origin "${QIMSDK_TOOLS_COMMIT}"
+        git -C sdk_tools checkout FETCH_HEAD
+        git -C sdk_tools tag "${QIMSDK_TOOLS_COMMIT}"
+      fi
     - git rev-parse HEAD
 
-    - echo "Building QIMSDK deploy image (ARM64) from checked-out sources"
+    - echo "Building QIMSDK deploy image (ARM64)"
     - cd "${QIMSDK_DEBIAN_DIR}"
     - |
-      docker build \
-        --build-arg QIMSDK_ARG_QNP_VERSION="${QIMSDK_ARG_QNP_VERSION}" \
-        --build-arg QIMSDK_ARG_CAMERA_SERVICE_TAG="${QIMSDK_ARG_CAMERA_SERVICE_TAG}" \
-        --build-arg QIMSDK_ARG_GST_PLUGINS_TAG="${QIMSDK_ARG_GST_PLUGINS_TAG}" \
-        --target qimsdk_deploy_arm64 \
-        -t "${FULL_IMAGE_NAME}" \
-        -f "${QIMSDK_DOCKERFILE}" \
-        .
+      bash -lc '
+          docker build --build-arg QIMSDK_ARG_QNP_VERSION=${QIMSDK_QAIRT_VERSION} --build-arg QIMSDK_ARG_CAMERA_SERVICE_TAG=${QIMSDK_CAMERA_SERVICE_COMMIT} --build-arg QIMSDK_ARG_GST_PLUGINS_TAG=${QIMSDK_GST_PLUGINS_COMMIT} --build-arg QIMSDK_ARG_SOLUTIONS_MICROSERVICES_TAG=${QIMSDK_SOLUTIONS_MICROSERVICES_COMMIT} --build-arg QIMSDK_ARG_GST_QTI_OSS_PATCHES_TAG=${QIMSDK_GST_QTI_PATCHES_COMMIT} --target qimsdk_deploy_py_arm64 -t qimsdk_deploy_py_arm64 . && docker build --build-arg QIMSDK_ARG_QNP_VERSION=${QIMSDK_QAIRT_VERSION} --build-arg QIMSDK_ARG_CAMERA_SERVICE_TAG=${QIMSDK_CAMERA_SERVICE_COMMIT} --build-arg QIMSDK_ARG_GST_PLUGINS_TAG=${QIMSDK_GST_PLUGINS_COMMIT} --build-arg QIMSDK_ARG_SOLUTIONS_MICROSERVICES_TAG=${QIMSDK_SOLUTIONS_MICROSERVICES_COMMIT} --build-arg QIMSDK_ARG_GST_QTI_OSS_PATCHES_TAG=${QIMSDK_GST_QTI_PATCHES_COMMIT} --target qimsdk_deploy_arm64 -t qimsdk_deploy_arm64 .
+      '
 
     # Ensure local 'latest' tag doesn't point to an older image before re-tagging
     - echo "Clearing any existing local :latest tag (safe if missing)"
-    - docker rmi "${FULL_IMAGE_LATEST}" 2>/dev/null || true
+    - docker rmi ${FULL_IMAGE_LATEST} ${FULL_IMAGE_PYTHON_NAME} 2>/dev/null || true
 
     - echo "Tagging the just-built image as :latest"
+    - docker tag "qimsdk_deploy_py_arm64" "${FULL_IMAGE_PYTHON_NAME}"
+    - docker tag "${FULL_IMAGE_PYTHON_NAME}" "${FULL_IMAGE_PYTHON_LATEST}"
+    - docker tag "qimsdk_deploy_arm64" "${FULL_IMAGE_NAME}"
     - docker tag "${FULL_IMAGE_NAME}" "${FULL_IMAGE_LATEST}"
 
     - echo "Pushing versioned image to Artifactory"
     - docker push "${FULL_IMAGE_NAME}"
+    - docker push "${FULL_IMAGE_PYTHON_NAME}"
 
     - echo "Pushing :latest tag to Artifactory"
     - docker push "${FULL_IMAGE_LATEST}"
+    - docker push "${FULL_IMAGE_PYTHON_LATEST}"
 
 # ---------------------------------------------------------
 # Smoke test: run container from the built image
@@ -122,4 +140,28 @@ test-with-image:
           cat /etc/os-release &&
           echo '== Image ==' &&
           echo 'qimsdk_deploy_arm64 smoke test PASSED'
+        "
+
+    - echo "Running QIMSDK python runtime smoke test on :latest"
+    - |
+      docker run --rm \
+        --entrypoint /bin/bash \
+        "${FULL_IMAGE_PYTHON_LATEST}" \
+        -c "
+          echo '== OS ==' &&
+          cat /etc/os-release &&
+          echo '== Image ==' &&
+          echo 'qimsdk_deploy_py_arm64 smoke test PASSED'
+        "
+
+    - echo "Running QIMSDK python runtime smoke test on versioned tag"
+    - |
+      docker run --rm \
+        --entrypoint /bin/bash \
+        "${FULL_IMAGE_PYTHON_NAME}" \
+        -c "
+          echo '== OS ==' &&
+          cat /etc/os-release &&
+          echo '== Image ==' &&
+          echo 'qimsdk_deploy_py_arm64 smoke test PASSED'
         "
